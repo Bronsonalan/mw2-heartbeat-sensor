@@ -29,7 +29,10 @@ SENSOR_HALF_CONE_DEG = 60.0
 SWEEP_TRAVEL_SECONDS = 0.85
 SWEEP_DWELL_SECONDS = 0.35
 SWEEP_CYCLE_SECONDS = SWEEP_TRAVEL_SECONDS + SWEEP_DWELL_SECONDS
+PHOSPHOR_TRAVEL_FRAMES = 26
+PHOSPHOR_DWELL_INDEX = 26
 REVEAL_STEPS = (1.0, 0.75, 0.50, 0.28, 0.12)
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 PALETTE = {
     "base": (0x04, 0x10, 0x0A),
@@ -77,6 +80,7 @@ FONT = {
     "I": ("01110", "00100", "00100", "00100", "00100", "00100", "01110"),
     "L": ("10000", "10000", "10000", "10000", "10000", "10000", "11111"),
     "M": ("10001", "11011", "10101", "10101", "10001", "10001", "10001"),
+    "m": ("00000", "00000", "11010", "10101", "10101", "10101", "10101"),
     "N": ("10001", "11001", "10101", "10011", "10001", "10001", "10001"),
     "O": ("01110", "10001", "10001", "10001", "10001", "10001", "01110"),
     "P": ("11110", "10001", "10001", "11110", "10000", "10000", "10000"),
@@ -85,13 +89,30 @@ FONT = {
     "T": ("11111", "00100", "00100", "00100", "00100", "00100", "00100"),
     "V": ("10001", "10001", "10001", "10001", "10001", "01010", "00100"),
 }
+SCANLINE_DARKEN_TABLE = bytes(int(value * 0.68) for value in range(256))
 
 
 class Canvas:
-    def __init__(self, width: int, height: int, color: tuple[int, int, int]) -> None:
+    def __init__(
+        self,
+        width: int,
+        height: int,
+        color: tuple[int, int, int],
+        pixels: bytes | bytearray | None = None,
+    ) -> None:
         self.width = width
         self.height = height
-        self.pixels = bytearray(color * (width * height))
+        if pixels is None:
+            self.pixels = bytearray(color * (width * height))
+        else:
+            expected = width * height * 3
+            if len(pixels) != expected:
+                raise ValueError(f"canvas pixel buffer must be {expected} bytes")
+            self.pixels = bytearray(pixels)
+
+    @classmethod
+    def from_pixels(cls, width: int, height: int, pixels: bytes | bytearray) -> "Canvas":
+        return cls(width, height, BACKGROUND, pixels=pixels)
 
     def blend_pixel(self, x: int, y: int, color: tuple[int, int, int], alpha: float = 1.0) -> None:
         if x < 0 or y < 0 or x >= self.width or y >= self.height or alpha <= 0.0:
@@ -163,11 +184,11 @@ class Canvas:
                 self.blend_pixel(x, y, color, alpha)
 
     def darken_scanlines(self) -> None:
+        stride = self.width * 3
         for y in range(1, self.height, 3):
-            start = y * self.width * 3
-            end = start + self.width * 3
-            for i in range(start, end):
-                self.pixels[i] = int(self.pixels[i] * 0.68)
+            start = y * stride
+            end = start + stride
+            self.pixels[start:end] = self.pixels[start:end].translate(SCANLINE_DARKEN_TABLE)
 
     def write_png(self, path: str) -> None:
         output = Path(path)
@@ -197,6 +218,13 @@ class PhosphorRenderer:
         self.sweep_reveal = sweep_reveal
         self.scanlines = scanlines
         self.assets_ok, self.asset_errors = validate_phosphor_assets(assets_dir)
+        self._asset_frames: list[bytes] | None = None
+        if self.assets_ok and self.size == BASE_SIZE:
+            try:
+                self._asset_frames = _load_phosphor_asset_frames(assets_dir)
+            except (OSError, ValueError, zlib.error) as exc:
+                self.assets_ok = False
+                self.asset_errors.append(f"unable to load phosphor assets: {exc}")
         self._last_sweep_distance: float | None = None
         self._revealed_at: dict[int, float] = {}
 
@@ -208,12 +236,17 @@ class PhosphorRenderer:
         fps_value: float | None = None,
     ) -> Canvas:
         width, height = self.size
-        canvas = Canvas(width, height, BACKGROUND)
         origin = (width // 2, int(height * 0.90))
         radius = int(height * 0.80)
         radius = max(64, min(radius, height - 16, width // 2 - 12))
         previous_sweep = self._last_sweep_distance
-        sweep_distance = self._draw_face(canvas, origin, radius, now)
+        asset_frame, sweep_distance = self._asset_frame(now)
+        if asset_frame is not None:
+            canvas = Canvas.from_pixels(width, height, asset_frame)
+            self._last_sweep_distance = sweep_distance
+        else:
+            canvas = Canvas(width, height, BACKGROUND)
+            sweep_distance = self._draw_face(canvas, origin, radius, now)
         tracks = list(_valid_tracks(snapshot.tracks))
         self._draw_contacts(canvas, tracks, origin, radius, previous_sweep, sweep_distance, now)
         self._draw_pill(canvas, tracks)
@@ -225,6 +258,12 @@ class PhosphorRenderer:
         if self.scanlines:
             canvas.darken_scanlines()
         return canvas
+
+    def _asset_frame(self, now: float) -> tuple[bytes | None, float]:
+        if self._asset_frames is None:
+            return None, 0.0
+        _, sweep_distance, frame_index = _sweep_state(now)
+        return self._asset_frames[frame_index], sweep_distance
 
     def _draw_face(self, canvas: Canvas, origin: tuple[int, int], radius: int, now: float) -> float:
         ox, oy = origin
@@ -239,13 +278,7 @@ class PhosphorRenderer:
             end = _polar(origin, radius, deg)
             canvas.draw_line(ox, oy, end[0], end[1], PALETTE["chevron"], 0.40, 1)
 
-        phase = now % SWEEP_CYCLE_SECONDS
-        if phase <= SWEEP_TRAVEL_SECONDS:
-            sweep_fraction = phase / SWEEP_TRAVEL_SECONDS
-            sweep_distance = sweep_fraction * MAX_RANGE_MM
-        else:
-            sweep_fraction = 1.0
-            sweep_distance = float(MAX_RANGE_MM)
+        sweep_fraction, sweep_distance, _ = _sweep_state(now)
         sweep_r = int(radius * sweep_fraction)
         for offset, alpha in ((0, 0.42), (-5, 0.22), (-10, 0.13), (-16, 0.08)):
             r = max(0, sweep_r + offset)
@@ -406,8 +439,8 @@ def draw_text(
     alpha: float = 1.0,
 ) -> None:
     cursor = x
-    for char in text.upper():
-        glyph = FONT.get(char, FONT[" "])
+    for char in text:
+        glyph = FONT.get(char) or FONT.get(char.upper(), FONT[" "])
         for yy, row in enumerate(glyph):
             for xx, bit in enumerate(row):
                 if bit == "1":
@@ -426,6 +459,169 @@ def _write_chunk(handle, kind: bytes, payload: bytes) -> None:
     checksum = zlib.crc32(kind)
     checksum = zlib.crc32(payload, checksum)
     handle.write(struct.pack("!I", checksum & 0xFFFFFFFF))
+
+
+def _sweep_state(now: float) -> tuple[float, float, int]:
+    phase = now % SWEEP_CYCLE_SECONDS
+    if phase < SWEEP_TRAVEL_SECONDS:
+        sweep_fraction = phase / SWEEP_TRAVEL_SECONDS
+        frame_index = min(PHOSPHOR_TRAVEL_FRAMES - 1, int(sweep_fraction * PHOSPHOR_TRAVEL_FRAMES))
+        return sweep_fraction, sweep_fraction * MAX_RANGE_MM, frame_index
+    return 1.0, float(MAX_RANGE_MM), PHOSPHOR_DWELL_INDEX
+
+
+def _load_phosphor_asset_frames(assets_dir: str) -> list[bytes]:
+    root = Path(assets_dir)
+    face_size, face = _load_png_rgb(root / "face.png")
+    if face_size != BASE_SIZE:
+        raise ValueError(f"face.png size {face_size[0]}x{face_size[1]} does not match {BASE_SIZE[0]}x{BASE_SIZE[1]}")
+    frames: list[bytes] = []
+    for index in range(PHOSPHOR_DWELL_INDEX + 1):
+        sweep_size, sweep = _load_png_rgb(root / f"sweep_{index:02d}.png")
+        if sweep_size != face_size:
+            raise ValueError(f"sweep_{index:02d}.png size does not match face.png")
+        frames.append(_composite_sweep_frame(face, sweep))
+    return frames
+
+
+def _composite_sweep_frame(face: bytes, sweep: bytes) -> bytes:
+    if len(face) != len(sweep):
+        raise ValueError("sweep frame size does not match face")
+    frame = bytearray(face)
+    for offset in range(0, len(sweep), 3):
+        sr = sweep[offset]
+        sg = sweep[offset + 1]
+        sb = sweep[offset + 2]
+        if sr or sg or sb:
+            frame[offset] = _screen_channel(frame[offset], sr)
+            frame[offset + 1] = _screen_channel(frame[offset + 1], sg)
+            frame[offset + 2] = _screen_channel(frame[offset + 2], sb)
+    return bytes(frame)
+
+
+def _screen_channel(base: int, overlay: int) -> int:
+    return 255 - ((255 - base) * (255 - overlay) // 255)
+
+
+def _load_png_rgb(path: Path) -> tuple[tuple[int, int], bytes]:
+    data = path.read_bytes()
+    if not data.startswith(PNG_SIGNATURE):
+        raise ValueError(f"{path.name} is not a PNG file")
+
+    offset = len(PNG_SIGNATURE)
+    width: int | None = None
+    height: int | None = None
+    bit_depth: int | None = None
+    color_type: int | None = None
+    interlace: int | None = None
+    idat_parts: list[bytes] = []
+    while offset < len(data):
+        if offset + 8 > len(data):
+            raise ValueError(f"{path.name} has a truncated PNG chunk")
+        length = int.from_bytes(data[offset : offset + 4], "big")
+        kind = data[offset + 4 : offset + 8]
+        payload_start = offset + 8
+        payload_end = payload_start + length
+        if payload_end + 4 > len(data):
+            raise ValueError(f"{path.name} has a truncated PNG payload")
+        payload = data[payload_start:payload_end]
+        offset = payload_end + 4
+        if kind == b"IHDR":
+            width = int.from_bytes(payload[0:4], "big")
+            height = int.from_bytes(payload[4:8], "big")
+            bit_depth = payload[8]
+            color_type = payload[9]
+            compression = payload[10]
+            filter_method = payload[11]
+            interlace = payload[12]
+            if compression != 0 or filter_method != 0:
+                raise ValueError(f"{path.name} uses unsupported PNG compression/filter settings")
+        elif kind == b"IDAT":
+            idat_parts.append(payload)
+        elif kind == b"IEND":
+            break
+
+    if width is None or height is None or bit_depth is None or color_type is None or interlace is None:
+        raise ValueError(f"{path.name} is missing IHDR")
+    if bit_depth != 8 or color_type not in (2, 6) or interlace != 0:
+        raise ValueError(f"{path.name} must be non-interlaced 8-bit RGB/RGBA")
+    if not idat_parts:
+        raise ValueError(f"{path.name} is missing image data")
+
+    channels = 4 if color_type == 6 else 3
+    stride = width * channels
+    rgb_stride = width * 3
+    raw = zlib.decompress(b"".join(idat_parts))
+    expected = (stride + 1) * height
+    if len(raw) != expected:
+        raise ValueError(f"{path.name} has unexpected decompressed length")
+
+    pixels = bytearray(width * height * 3)
+    previous = bytearray(stride)
+    raw_offset = 0
+    output_offset = 0
+    for _ in range(height):
+        filter_type = raw[raw_offset]
+        raw_offset += 1
+        row = bytearray(raw[raw_offset : raw_offset + stride])
+        raw_offset += stride
+        _unfilter_png_row(row, previous, channels, filter_type, path.name)
+        if color_type == 2:
+            pixels[output_offset : output_offset + rgb_stride] = row
+        else:
+            _copy_rgba_as_rgb(row, pixels, output_offset)
+        previous = row
+        output_offset += rgb_stride
+    return (width, height), bytes(pixels)
+
+
+def _copy_rgba_as_rgb(row: bytearray, pixels: bytearray, output_offset: int) -> None:
+    target = output_offset
+    for source in range(0, len(row), 4):
+        alpha = row[source + 3]
+        pixels[target] = row[source] * alpha // 255
+        pixels[target + 1] = row[source + 1] * alpha // 255
+        pixels[target + 2] = row[source + 2] * alpha // 255
+        target += 3
+
+
+def _unfilter_png_row(row: bytearray, previous: bytearray, bpp: int, filter_type: int, filename: str) -> None:
+    if filter_type == 0:
+        return
+    if filter_type == 1:
+        for index in range(len(row)):
+            left = row[index - bpp] if index >= bpp else 0
+            row[index] = (row[index] + left) & 0xFF
+        return
+    if filter_type == 2:
+        for index in range(len(row)):
+            row[index] = (row[index] + previous[index]) & 0xFF
+        return
+    if filter_type == 3:
+        for index in range(len(row)):
+            left = row[index - bpp] if index >= bpp else 0
+            row[index] = (row[index] + ((left + previous[index]) // 2)) & 0xFF
+        return
+    if filter_type == 4:
+        for index in range(len(row)):
+            left = row[index - bpp] if index >= bpp else 0
+            up = previous[index]
+            upper_left = previous[index - bpp] if index >= bpp else 0
+            row[index] = (row[index] + _paeth_predictor(left, up, upper_left)) & 0xFF
+        return
+    raise ValueError(f"{filename} uses unsupported PNG filter {filter_type}")
+
+
+def _paeth_predictor(left: int, up: int, upper_left: int) -> int:
+    estimate = left + up - upper_left
+    left_distance = abs(estimate - left)
+    up_distance = abs(estimate - up)
+    upper_left_distance = abs(estimate - upper_left)
+    if left_distance <= up_distance and left_distance <= upper_left_distance:
+        return left
+    if up_distance <= upper_left_distance:
+        return up
+    return upper_left
 
 
 def validate_phosphor_assets(assets_dir: str = "assets/phosphor") -> tuple[bool, list[str]]:

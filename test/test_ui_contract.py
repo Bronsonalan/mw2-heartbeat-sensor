@@ -5,6 +5,7 @@ import io
 import tempfile
 import types
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from test.contract_support import (
@@ -140,6 +141,39 @@ class RadarCliContractTests(unittest.TestCase):
         self.assertEqual(radar.distance_label([track(1300)]), "1.3m")
         self.assertEqual(radar.distance_label([track(6100)]), ">6 M")
         self.assertEqual(radar.distance_label([track(1300, "fading")]), "--.-m")
+
+    def test_phosphor_renderer_uses_asset_pack_for_base_size(self) -> None:
+        radar = optional_import(self, "radar")
+        sources = optional_import(self, "sources")
+        renderer = radar.PhosphorRenderer(scanlines=False)
+
+        self.assertTrue(renderer.assets_ok, renderer.asset_errors)
+        self.assertIsNotNone(renderer._asset_frames)
+        with mock.patch.object(renderer, "_draw_arc", side_effect=AssertionError("procedural face path used")):
+            canvas = renderer.render(sources.SourceSnapshot([], None, 0), now=0.2)
+
+        self.assertEqual((canvas.width, canvas.height), radar.BASE_SIZE)
+
+    def test_scanlines_darken_rows_without_touching_others(self) -> None:
+        radar = optional_import(self, "radar")
+        canvas = radar.Canvas(2, 4, (100, 50, 25))
+
+        canvas.darken_scanlines()
+
+        stride = canvas.width * 3
+        self.assertEqual(bytes(canvas.pixels[0:stride]), bytes((100, 50, 25) * 2))
+        self.assertEqual(bytes(canvas.pixels[stride : stride * 2]), bytes((68, 34, 17) * 2))
+        self.assertEqual(bytes(canvas.pixels[stride * 2 : stride * 3]), bytes((100, 50, 25) * 2))
+
+    def test_draw_text_preserves_lowercase_distance_unit(self) -> None:
+        radar = optional_import(self, "radar")
+        lower = radar.Canvas(40, 20, (0, 0, 0))
+        upper = radar.Canvas(40, 20, (0, 0, 0))
+
+        radar.draw_text(lower, "m", 0, 0, 2, (255, 255, 255))
+        radar.draw_text(upper, "M", 0, 0, 2, (255, 255, 255))
+
+        self.assertNotEqual(lower.pixels, upper.pixels)
 
 
 if __name__ == "__main__":

@@ -5,8 +5,10 @@ import inspect
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 import ld2450
+import radar
 import replay
 import simulator
 import sources
@@ -30,8 +32,8 @@ def _class_names_defined_in(module_name: str) -> set[str]:
 
 
 class ModelPathImportTests(unittest.TestCase):
-    def test_simulator_and_replay_do_not_define_model_classes(self) -> None:
-        for module_name in ("simulator", "replay"):
+    def test_ui_layers_do_not_define_model_classes(self) -> None:
+        for module_name in ("simulator", "replay", "radar"):
             with self.subTest(module=module_name):
                 defined = _class_names_defined_in(module_name)
                 self.assertFalse(
@@ -55,6 +57,11 @@ class ModelPathImportTests(unittest.TestCase):
         source = replay.ReplaySource(str(ROOT / "fixtures" / "walk-01.ndjson"), realtime=False)
         self.assertIsInstance(source._tracker, tracking.Tracker)
 
+    def test_radar_uses_canonical_source_classes(self) -> None:
+        self.assertIs(radar.RadarSource, sources.RadarSource)
+        self.assertIs(radar.DemoSource, simulator.DemoSource)
+        self.assertIs(radar.ReplaySource, replay.ReplaySource)
+
     def test_simple_tracker_is_not_exposed_as_a_class(self) -> None:
         for module in (simulator, replay):
             with self.subTest(module=module.__name__):
@@ -66,8 +73,6 @@ class ModelPathImportTests(unittest.TestCase):
 
 class RadarLiveSourceTests(unittest.TestCase):
     def test_live_cli_source_constructs_radar_source(self) -> None:
-        import radar
-
         with tempfile.TemporaryDirectory() as temp_dir:
             missing_port = str(Path(temp_dir) / "missing-serial")
             args = radar.build_parser().parse_args(
@@ -88,6 +93,22 @@ class RadarLiveSourceTests(unittest.TestCase):
                 self.assertEqual(source.port, missing_port)
                 self.assertEqual(source.baud, 115200)
                 self.assertEqual(source.tracker.orientation, tracking.Orientation(swap_xy=True, invert_x=True))
+            finally:
+                source.stop()
+
+    def test_live_missing_port_snapshot_renders_sensor_offline(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            missing_port = str(Path(temp_dir) / "missing-serial")
+            args = radar.build_parser().parse_args(["--source", "live", "--port", missing_port])
+            source = radar.make_source(args)
+            try:
+                snapshot = source.snapshot()
+                self.assertIsInstance(source, sources.RadarSource)
+                self.assertTrue(snapshot.error)
+                renderer = radar.PhosphorRenderer(scanlines=False)
+                with mock.patch("radar.draw_text", wraps=radar.draw_text) as draw_text:
+                    renderer.render(snapshot, now=0.0)
+                self.assertIn("SENSOR OFFLINE", [call.args[1] for call in draw_text.call_args_list])
             finally:
                 source.stop()
 
