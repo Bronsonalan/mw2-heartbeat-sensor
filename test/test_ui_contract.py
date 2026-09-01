@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import tempfile
 import types
 import unittest
@@ -69,8 +71,9 @@ class RadarCliContractTests(unittest.TestCase):
         for source in ("live", "demo", "replay"):
             with self.subTest(source=source):
                 self.assertEqual(parser.parse_args(["--source", source]).source, source)
-        with self.assertRaises(SystemExit):
-            parser.parse_args(["--source", "invalid"])
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                parser.parse_args(["--source", "invalid"])
 
         for ui in ("template", "phosphor"):
             with self.subTest(ui=ui):
