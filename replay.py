@@ -9,7 +9,9 @@ from pathlib import Path
 import time
 from typing import Callable, Iterable
 
-from simulator import Orientation, SimpleTracker, SourceSnapshot, Target, Track
+from ld2450 import Target
+from sources import SourceSnapshot
+from tracking import Orientation, Track, Tracker
 
 
 MAX_FRAMES_PER_SNAPSHOT = 500
@@ -42,7 +44,7 @@ class ReplaySource:
         self._load_error: str | None = None
         self._index = 0
         self._loop_count = 0
-        self._tracker = SimpleTracker(clock=clock)
+        self._tracker = Tracker(orientation=orientation, clock=clock)
         self._snapshot = SourceSnapshot([], None, 0)
         self._real_started_at: float | None = None
         self._stopped = False
@@ -105,7 +107,7 @@ class ReplaySource:
 
     def _consume(self, record: _Record, playback_t: float) -> None:
         if record.kind == "targets":
-            tracks = self._tracker.update(record.items, timestamp=playback_t)  # type: ignore[arg-type]
+            tracks = self._tracker.update(record.items, now=playback_t)  # type: ignore[arg-type]
         else:
             tracks = self._offset_tracks(record.items)  # type: ignore[arg-type]
         self._snapshot = SourceSnapshot(
@@ -206,9 +208,7 @@ class ReplaySource:
             resolution = _integer(item.get("resolution"))
             if None in (x, y, speed, resolution):
                 return None
-            targets.append(
-                self.orientation.apply(Target(x, y, speed, resolution))  # type: ignore[arg-type]
-            )
+            targets.append(Target(x, y, speed, resolution))  # type: ignore[arg-type]
         return targets
 
     def _parse_tracks(self, value: object) -> list[Track] | None:

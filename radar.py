@@ -18,7 +18,9 @@ import zlib
 from typing import Iterable
 
 from replay import ReplaySource
-from simulator import DemoSource, Orientation, SourceSnapshot, StaticErrorSource, Track
+from simulator import DemoSource, StaticErrorSource
+from sources import RadarSource, SourceSnapshot
+from tracking import Orientation, Track
 
 
 BASE_SIZE = (640, 480)
@@ -531,7 +533,7 @@ def make_source(args: argparse.Namespace):
         if not args.fixture:
             return StaticErrorSource("replay fixture is required")
         return ReplaySource(args.fixture, loop=True, realtime=True, orientation=orientation)
-    return StaticErrorSource("live source is unavailable in this no-hardware build")
+    return RadarSource(port=args.port, baud=args.baud, orientation=orientation)
 
 
 def run(args: argparse.Namespace) -> int:
