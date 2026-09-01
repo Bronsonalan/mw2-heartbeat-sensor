@@ -24,6 +24,7 @@ The project should include tests before the live hardware path is treated as com
 ## Desktop Gate
 
 The desktop gate should pass without the radar sensor attached:
+Replay and demo mode must pass without the radar sensor attached.
 
 ```bash
 python3 -m unittest discover -s test -t .
