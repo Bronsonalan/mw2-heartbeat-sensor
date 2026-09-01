@@ -15,7 +15,7 @@ import struct
 import sys
 import time
 import zlib
-from typing import Iterable
+from typing import Any, Iterable, NamedTuple
 
 from replay import ReplaySource
 from simulator import DemoSource, StaticErrorSource
@@ -52,6 +52,10 @@ BACKGROUND = tuple(
     int(PALETTE["base"][index] + (PALETTE["wash"][index] - PALETTE["base"][index]) * 0.15)
     for index in range(3)
 )
+PHOSPHOR_HALO = PALETTE["halo"]
+PHOSPHOR_MID = PALETTE["mid"]
+PHOSPHOR_CORE = PALETTE["core"]
+PHOSPHOR_VOID = PALETTE["void"]
 
 
 FONT = {
@@ -90,6 +94,13 @@ FONT = {
     "V": ("10001", "10001", "10001", "10001", "10001", "01010", "00100"),
 }
 SCANLINE_DARKEN_TABLE = bytes(int(value * 0.68) for value in range(256))
+
+
+class PhosphorGeometry(NamedTuple):
+    width: int
+    height: int
+    origin: tuple[int, int]
+    radius: int
 
 
 class Canvas:
@@ -236,9 +247,9 @@ class PhosphorRenderer:
         fps_value: float | None = None,
     ) -> Canvas:
         width, height = self.size
-        origin = (width // 2, int(height * 0.90))
-        radius = int(height * 0.80)
-        radius = max(64, min(radius, height - 16, width // 2 - 12))
+        geom = _phosphor_geometry(self.size)
+        origin = geom.origin
+        radius = geom.radius
         previous_sweep = self._last_sweep_distance
         asset_frame, sweep_distance = self._asset_frame(now)
         if asset_frame is not None:
@@ -326,8 +337,8 @@ class PhosphorRenderer:
             if brightness <= 0.0:
                 continue
             bearing = max(-SENSOR_HALF_CONE_DEG, min(SENSOR_HALF_CONE_DEG, track.angle))
-            r = int(radius * distance / MAX_RANGE_MM)
-            x, y = _polar(origin, r, bearing)
+            r = radius * distance / MAX_RANGE_MM
+            x, y = _polar_float(origin, r, bearing)
             self._draw_pip(canvas, x, y, brightness)
 
     def _contact_brightness(
@@ -357,11 +368,15 @@ class PhosphorRenderer:
             brightness *= max(0.18, 1.0 - faded_for / 1.3)
         return brightness
 
-    def _draw_pip(self, canvas: Canvas, x: int, y: int, brightness: float) -> None:
-        canvas.draw_circle(x, y, 15, PALETTE["halo"], 0.15 * brightness, fill=True)
-        canvas.draw_circle(x, y, 9, PALETTE["halo"], 0.24 * brightness, fill=True)
-        canvas.draw_circle(x, y, 5, PALETTE["mid"], 0.70 * brightness, fill=True)
-        canvas.draw_circle(x, y, 2, PALETTE["core"], min(1.0, 0.95 * brightness), fill=True)
+    def _draw_pip(self, canvas: Canvas, x: float, y: float, brightness: float) -> None:
+        cx = int(round(x))
+        cy = int(round(y))
+        h = canvas.height
+        canvas.draw_circle(cx, cy, max(3, round(h * 0.047)), PHOSPHOR_HALO, 0.12 * brightness, fill=True)
+        canvas.draw_circle(cx, cy, max(2, round(h * 0.037)), PHOSPHOR_VOID, 0.82 * brightness, fill=True)
+        canvas.draw_circle(cx, cy, max(2, round(h * 0.030)), PHOSPHOR_HALO, 0.35 * brightness, fill=True)
+        canvas.draw_circle(cx, cy, max(1, round(h * 0.019)), PHOSPHOR_MID, 0.82 * brightness, fill=True)
+        canvas.draw_circle(cx, cy, max(1, round(h * 0.0086)), PHOSPHOR_CORE, min(1.0, brightness), fill=True)
 
     def _draw_pill(self, canvas: Canvas, tracks: list[Track]) -> None:
         width = canvas.width
@@ -394,6 +409,181 @@ class PhosphorRenderer:
         draw_text(canvas, label, x, y, 2, PALETTE["halo"], 0.9)
 
 
+class PygamePhosphorRenderer:
+    def __init__(
+        self,
+        pygame: Any,
+        size: tuple[int, int] = BASE_SIZE,
+        sweep_reveal: bool = True,
+        scanlines: bool = True,
+        assets_dir: str = "assets/phosphor",
+    ) -> None:
+        self.pygame = pygame
+        self.size = size
+        self.sweep_reveal = sweep_reveal
+        self.scanlines = scanlines
+        self.assets_ok = False
+        self.asset_errors: list[str] = []
+        self._face: Any | None = None
+        self._sweeps: list[Any] = []
+        self._fallback = PhosphorRenderer(size=size, sweep_reveal=sweep_reveal, scanlines=scanlines, assets_dir=assets_dir)
+        self._last_sweep_distance: float | None = None
+        self._revealed_at: dict[int, float] = {}
+        self._pill_font = None
+        self._small_font = None
+        try:
+            pygame.font.init()
+            self._pill_font = pygame.font.Font(None, max(24, round(size[1] * 0.068)))
+            self._small_font = pygame.font.Font(None, max(18, round(size[1] * 0.045)))
+        except Exception as exc:
+            self.asset_errors.append(f"unable to initialize pygame fonts: {exc}")
+        if size != BASE_SIZE:
+            self.asset_errors.append("phosphor asset pack is only available at 640x480")
+            return
+        try:
+            self._face, self._sweeps = load_phosphor_sweep_assets(pygame, assets_dir, size)
+            self.assets_ok = True
+        except (OSError, ValueError) as exc:
+            self.asset_errors.append(f"unable to load phosphor assets: {exc}")
+
+    def render(
+        self,
+        snapshot: SourceSnapshot,
+        now: float,
+        show_fps: bool = False,
+        fps_value: float | None = None,
+    ) -> Any:
+        if not self.assets_ok or self._face is None:
+            canvas = self._fallback.render(snapshot, now, show_fps=show_fps, fps_value=fps_value)
+            return self.pygame.image.frombuffer(bytes(canvas.pixels), self.size, "RGB").copy()
+
+        geom = _phosphor_geometry(self.size)
+        _, sweep_distance, frame_index = _sweep_state(now)
+        previous_sweep = self._last_sweep_distance
+        frame = self._face.copy()
+        frame.blit(self._sweeps[frame_index], (0, 0), special_flags=self.pygame.BLEND_ADD)
+        self._last_sweep_distance = sweep_distance
+        draw_phosphor_hud(
+            self.pygame,
+            frame,
+            geom,
+            list(_valid_tracks(snapshot.tracks)),
+            snapshot.error,
+            previous_sweep,
+            sweep_distance,
+            now,
+            self._revealed_at,
+            self.sweep_reveal,
+            self._pill_font,
+            self._small_font,
+            show_fps,
+            fps_value,
+        )
+        if self.scanlines:
+            _draw_pygame_scanlines(self.pygame, frame)
+        return frame
+
+
+def load_phosphor_sweep_assets(
+    pygame: Any,
+    assets_dir: str = "assets/phosphor",
+    size: tuple[int, int] = BASE_SIZE,
+) -> tuple[Any, list[Any]]:
+    assets_ok, errors = validate_phosphor_assets(assets_dir)
+    if not assets_ok:
+        raise ValueError("; ".join(errors))
+
+    root = Path(assets_dir)
+    face = _load_pygame_surface(pygame, root / "face.png", size)
+    sweeps = [_load_pygame_surface(pygame, root / f"sweep_{index:02d}.png", size) for index in range(PHOSPHOR_DWELL_INDEX + 1)]
+    return face, sweeps
+
+
+def draw_phosphor_contact(
+    pygame: Any,
+    frame: Any,
+    geom: PhosphorGeometry,
+    contact: Track,
+    now: float,
+    brightness: float,
+) -> None:
+    distance = contact.distance
+    if distance > MAX_RANGE_MM:
+        return
+    fade = brightness
+    if contact.state == "acquiring":
+        fade *= 0.63
+    elif contact.state == "fading":
+        fade *= min(1.0, max(0.18, 1.0 - (now - contact.last_seen) / 1.3))
+    if fade <= 0:
+        return
+
+    h = geom.height
+    bearing = max(-SENSOR_HALF_CONE_DEG, min(SENSOR_HALF_CONE_DEG, contact.angle))
+    contact_radius = geom.radius * distance / MAX_RANGE_MM
+    px, py = _polar_float(geom.origin, contact_radius, bearing)
+    local_scale = 2
+    outer_radius = max(3, round(h * 0.047))
+    padding = max(3, round(outer_radius * 0.75))
+    native_side = outer_radius * 2 + padding * 2
+    high_side = native_side * local_scale
+    local = pygame.Surface((high_side, high_side), pygame.SRCALPHA)
+    bloom = pygame.Surface((high_side, high_side), pygame.SRCALPHA)
+    origin_x = round(px)
+    origin_y = round(py)
+    centre = (
+        high_side // 2 + round((px - origin_x) * local_scale),
+        high_side // 2 + round((py - origin_y) * local_scale),
+    )
+
+    def ring(colour: tuple[int, int, int], alpha: float, radius: float) -> None:
+        clamped = max(0.0, min(1.0, alpha))
+        pygame.draw.circle(local, (*colour, round(255 * clamped)), centre, max(1, round(radius * local_scale)))
+
+    pygame.draw.circle(bloom, (*PHOSPHOR_HALO, round(255 * 0.18 * fade)), centre, max(1, round(outer_radius * local_scale)))
+    ring(PHOSPHOR_VOID, 0.85 * fade, h * 0.037)
+    ring(PHOSPHOR_HALO, 0.35 * fade, h * 0.030)
+    ring(PHOSPHOR_MID, fade, h * 0.019)
+    ring(PHOSPHOR_CORE, fade, h * 0.0086)
+    tiny = pygame.transform.smoothscale(bloom, (max(1, high_side // 3), max(1, high_side // 3)))
+    glow = pygame.transform.smoothscale(tiny, (native_side, native_side))
+    crisp = pygame.transform.smoothscale(local, (native_side, native_side))
+    destination = (round(origin_x - native_side / 2), round(origin_y - native_side / 2))
+    frame.blit(glow, destination)
+    frame.blit(crisp, destination)
+
+
+def draw_phosphor_hud(
+    pygame: Any,
+    frame: Any,
+    geom: PhosphorGeometry,
+    tracks: list[Track],
+    error: str | None,
+    previous_sweep_distance: float | None,
+    sweep_distance: float,
+    now: float,
+    revealed_at: dict[int, float],
+    sweep_reveal: bool,
+    pill_font: Any,
+    small_font: Any,
+    show_fps: bool = False,
+    fps_value: float | None = None,
+) -> None:
+    previous_sweep = 0.0 if previous_sweep_distance is None else previous_sweep_distance
+    if sweep_distance < previous_sweep:
+        previous_sweep = 0.0
+    for track in tracks:
+        brightness = _contact_reveal_brightness(track, previous_sweep, sweep_distance, now, revealed_at, sweep_reveal)
+        if brightness > 0.0:
+            draw_phosphor_contact(pygame, frame, geom, track, now, brightness)
+    _draw_pygame_pill(pygame, frame, geom, distance_label(tracks), pill_font)
+    if error:
+        _draw_pygame_offline(pygame, frame, geom, small_font)
+    if show_fps:
+        label = "FPS --" if fps_value is None else f"FPS {int(round(fps_value)):02d}"
+        _draw_pygame_label(pygame, frame, label, geom.width - 10, geom.height - 24, small_font, align_right=True)
+
+
 def distance_label(tracks: Iterable[Track]) -> str:
     solid = [track for track in _valid_tracks(tracks) if track.state != "fading"]
     if not solid:
@@ -421,11 +611,126 @@ def _valid_tracks(tracks: Iterable[object]) -> Iterable[Track]:
         yield Track(ident, x, y, speed, state, age, last_seen)
 
 
+def _contact_reveal_brightness(
+    track: Track,
+    previous_sweep: float,
+    sweep_distance: float,
+    now: float,
+    revealed_at: dict[int, float],
+    sweep_reveal: bool,
+) -> float:
+    if track.distance > MAX_RANGE_MM:
+        return 0.0
+    if not sweep_reveal:
+        return 1.0
+    crossed = previous_sweep <= track.distance <= sweep_distance
+    if crossed:
+        revealed_at[track.id] = now
+    seen_at = revealed_at.get(track.id)
+    if seen_at is None:
+        return 0.0
+    age = max(0.0, now - seen_at)
+    step = min(len(REVEAL_STEPS) - 1, int((age / SWEEP_CYCLE_SECONDS) * len(REVEAL_STEPS)))
+    return REVEAL_STEPS[step]
+
+
+def _load_pygame_surface(pygame: Any, path: Path, size: tuple[int, int]) -> Any:
+    surface = pygame.image.load(str(path))
+    if surface.get_size() != size:
+        raise ValueError(f"{path.name} size {surface.get_width()}x{surface.get_height()} does not match {size[0]}x{size[1]}")
+    try:
+        if pygame.display.get_init() and pygame.display.get_surface() is not None:
+            return surface.convert_alpha()
+    except Exception:
+        pass
+    return surface.copy()
+
+
+def _draw_pygame_pill(pygame: Any, frame: Any, geom: PhosphorGeometry, label: str, font: Any) -> None:
+    rendered = _render_pygame_text(font, label, PALETTE["pill_text"])
+    text_w = rendered.get_width() if rendered is not None else text_width(label, 3)
+    text_h = rendered.get_height() if rendered is not None else 21
+    pill_w = max(118, text_w + 34)
+    pill_h = max(34, text_h + 14)
+    x = (geom.width - pill_w) // 2
+    y = geom.height - pill_h - 12
+    pill = pygame.Surface((pill_w, pill_h), pygame.SRCALPHA)
+    rect = pygame.Rect(0, 0, pill_w, pill_h)
+    pygame.draw.rect(pill, (*PALETTE["pill_fill"], 235), rect)
+    pygame.draw.rect(pill, (*PALETTE["edge"], 158), rect, width=1)
+    if rendered is not None:
+        pill.blit(rendered, ((pill_w - rendered.get_width()) // 2, (pill_h - rendered.get_height()) // 2))
+    frame.blit(pill, (x, y))
+
+
+def _draw_pygame_offline(pygame: Any, frame: Any, geom: PhosphorGeometry, font: Any) -> None:
+    label = "SENSOR OFFLINE"
+    rendered = _render_pygame_text(font, label, PHOSPHOR_HALO)
+    text_w = rendered.get_width() if rendered is not None else text_width(label, 2)
+    text_h = rendered.get_height() if rendered is not None else 14
+    panel_w = text_w + 28
+    panel_h = text_h + 14
+    x = (geom.width - panel_w) // 2
+    y = 13
+    panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+    pygame.draw.rect(panel, (*PALETTE["pill_fill"], 242), pygame.Rect(0, 0, panel_w, panel_h))
+    if rendered is not None:
+        panel.blit(rendered, ((panel_w - rendered.get_width()) // 2, (panel_h - rendered.get_height()) // 2))
+    frame.blit(panel, (x, y))
+
+
+def _draw_pygame_label(
+    pygame: Any,
+    frame: Any,
+    label: str,
+    x: int,
+    y: int,
+    font: Any,
+    align_right: bool = False,
+) -> None:
+    rendered = _render_pygame_text(font, label, PALETTE["pill_text"])
+    if rendered is None:
+        return
+    if align_right:
+        x -= rendered.get_width()
+    frame.blit(rendered, (x, y))
+
+
+def _render_pygame_text(font: Any, label: str, colour: tuple[int, int, int]) -> Any | None:
+    if font is None:
+        return None
+    return font.render(label, True, colour)
+
+
+def _draw_pygame_scanlines(pygame: Any, frame: Any) -> None:
+    width, height = frame.get_size()
+    overlay = pygame.Surface((width, height), pygame.SRCALPHA)
+    for y in range(1, height, 3):
+        pygame.draw.line(overlay, (0, 0, 0, 82), (0, y), (width, y))
+    frame.blit(overlay, (0, 0))
+
+
+def _phosphor_geometry(size: tuple[int, int]) -> PhosphorGeometry:
+    width, height = size
+    origin = (width // 2, int(height * 0.90))
+    radius = int(height * 0.80)
+    radius = max(64, min(radius, height - 16, width // 2 - 12))
+    return PhosphorGeometry(width, height, origin, radius)
+
+
 def _polar(origin: tuple[int, int], radius: int, bearing_deg: float) -> tuple[int, int]:
     radians = math.radians(bearing_deg)
     return (
         int(round(origin[0] + math.sin(radians) * radius)),
         int(round(origin[1] - math.cos(radians) * radius)),
+    )
+
+
+def _polar_float(origin: tuple[int, int], radius: float, bearing_deg: float) -> tuple[float, float]:
+    radians = math.radians(bearing_deg)
+    return (
+        origin[0] + math.sin(radians) * radius,
+        origin[1] - math.cos(radians) * radius,
     )
 
 
@@ -734,67 +1039,75 @@ def make_source(args: argparse.Namespace):
 
 def run(args: argparse.Namespace) -> int:
     source = make_source(args)
+    return run_phosphor(args, source)
+
+
+def run_phosphor(args: argparse.Namespace, source: Any) -> int:
     renderer = PhosphorRenderer(size=args.size, sweep_reveal=args.sweep_reveal, scanlines=args.scanlines)
     frames = max(1, args.selftest) if args.selftest is not None else None
     finite = frames is not None or args.screenshot is not None
-    pygame = _load_pygame() if not finite else None
+    pygame = _load_pygame()
     screen = None
     clock = None
     if pygame is not None:
         try:
             pygame.init()
-            flags = pygame.FULLSCREEN if args.fullscreen else 0
-            screen = pygame.display.set_mode(args.size, flags)
-            pygame.display.set_caption("MW2 Heartbeat Sensor")
-            clock = pygame.time.Clock()
+            renderer = PygamePhosphorRenderer(pygame, size=args.size, sweep_reveal=args.sweep_reveal, scanlines=args.scanlines)
+            if not finite:
+                flags = pygame.FULLSCREEN if args.fullscreen else 0
+                screen = pygame.display.set_mode(args.size, flags)
+                pygame.display.set_caption("MW2 Heartbeat Sensor")
+                clock = pygame.time.Clock()
         except Exception as exc:
             print(f"pygame display unavailable, using headless renderer: {exc}", file=sys.stderr)
             pygame = None
+            renderer = PhosphorRenderer(size=args.size, sweep_reveal=args.sweep_reveal, scanlines=args.scanlines)
     elif not finite:
         print("pygame is not available; running headless. Use --selftest to exit automatically.", file=sys.stderr)
 
     target_fps = 60
     frame_count = 0
-    last_canvas: Canvas | None = None
+    last_frame: Canvas | Any | None = None
     last_tick = time.monotonic()
     fps_value: float | None = None
     try:
-        while frames is None or frame_count < frames:
-            now = time.monotonic()
-            elapsed = max(1e-6, now - last_tick)
-            last_tick = now
-            fps_value = 1.0 / elapsed
-            if pygame is not None:
-                for event in pygame.event.get():
-                    if event.type == pygame.QUIT:
-                        frames = frame_count
-                    elif event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_q):
-                        frames = frame_count
-            snapshot = source.snapshot()
-            last_canvas = renderer.render(snapshot, now=now, show_fps=args.fps, fps_value=fps_value)
-            if screen is not None and pygame is not None:
-                surface = pygame.image.frombuffer(bytes(last_canvas.pixels), args.size, "RGB")
-                screen.blit(surface, (0, 0))
-                pygame.display.flip()
-                assert clock is not None
-                clock.tick(target_fps)
-            else:
-                time.sleep(1.0 / target_fps)
-            frame_count += 1
-            if args.screenshot is not None and args.selftest is None:
-                break
-    except KeyboardInterrupt:
-        pass
+        try:
+            while frames is None or frame_count < frames:
+                now = time.monotonic()
+                elapsed = max(1e-6, now - last_tick)
+                last_tick = now
+                fps_value = 1.0 / elapsed
+                if screen is not None and pygame is not None:
+                    for event in pygame.event.get():
+                        if event.type == pygame.QUIT:
+                            frames = frame_count
+                        elif event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_q):
+                            frames = frame_count
+                snapshot = source.snapshot()
+                last_frame = renderer.render(snapshot, now=now, show_fps=args.fps, fps_value=fps_value)
+                if screen is not None and pygame is not None:
+                    screen.blit(last_frame, (0, 0))
+                    pygame.display.flip()
+                    assert clock is not None
+                    clock.tick(target_fps)
+                else:
+                    time.sleep(1.0 / target_fps)
+                frame_count += 1
+                if args.screenshot is not None and args.selftest is None:
+                    break
+        except KeyboardInterrupt:
+            pass
+        finally:
+            source.stop()
+
+        if args.screenshot:
+            if last_frame is None:
+                last_frame = renderer.render(source.snapshot(), now=time.monotonic(), show_fps=args.fps, fps_value=fps_value)
+            _write_rendered_frame(last_frame, args.screenshot, pygame)
+        return 0
     finally:
-        source.stop()
         if pygame is not None:
             pygame.quit()
-
-    if args.screenshot:
-        if last_canvas is None:
-            last_canvas = renderer.render(source.snapshot(), now=time.monotonic(), show_fps=args.fps, fps_value=fps_value)
-        last_canvas.write_png(args.screenshot)
-    return 0
 
 
 def _load_pygame():
@@ -803,6 +1116,17 @@ def _load_pygame():
     except Exception:
         return None
     return pygame
+
+
+def _write_rendered_frame(frame: Any, path: str, pygame: Any | None) -> None:
+    if isinstance(frame, Canvas):
+        frame.write_png(path)
+        return
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    if pygame is None:
+        raise RuntimeError("pygame frame cannot be written without pygame")
+    pygame.image.save(frame, str(output))
 
 
 def main(argv: list[str] | None = None) -> int:
