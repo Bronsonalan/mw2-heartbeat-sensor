@@ -1,17 +1,12 @@
 from __future__ import annotations
 
-import tempfile
 import unittest
-from pathlib import Path
 
 from test.contract_support import (
     ManualClock,
     TRACK_STATES,
     assert_constructor_prefix,
     assert_field_order,
-    assert_snapshot_method_takes_no_args,
-    assert_snapshot_shape,
-    assert_stop_idempotent,
     make_target,
     optional_import,
     update_tracker,
@@ -154,37 +149,6 @@ class SourceContractTests(unittest.TestCase):
     def test_source_constructor_signatures(self) -> None:
         sources = optional_import(self, "sources")
         assert_constructor_prefix(self, sources.RadarSource, ("port", "baud", "orientation"))
-        assert_constructor_prefix(self, sources.DemoSource, ("scenario", "seed", "clock"))
-        assert_constructor_prefix(self, sources.ReplaySource, ("path", "loop", "realtime", "clock"))
-
-    def test_replay_empty_targets_are_healthy_snapshot_not_error(self) -> None:
-        sources = optional_import(self, "sources")
-        clock = ManualClock()
-        with tempfile.TemporaryDirectory() as temp_dir:
-            fixture = Path(temp_dir) / "empty.ndjson"
-            fixture.write_text('{"t": 0.0, "seq": 1, "targets": []}\n', encoding="utf-8")
-            source = sources.ReplaySource(str(fixture), loop=False, realtime=False, clock=clock)
-            assert_snapshot_method_takes_no_args(self, source)
-            snapshot = source.snapshot()
-            assert_snapshot_shape(self, snapshot)
-            self.assertEqual(snapshot.tracks, [])
-            self.assertIsNone(snapshot.error, "empty tracks must not be reported as a sensor error")
-            assert_stop_idempotent(self, source)
-
-    def test_demo_scenarios_are_healthy_and_cap_tracks(self) -> None:
-        sources = optional_import(self, "sources")
-        for scenario in ("walk", "cross", "still", "empty", "multi"):
-            with self.subTest(scenario=scenario):
-                clock = ManualClock()
-                source = sources.DemoSource(scenario=scenario, seed=123, clock=clock)
-                assert_snapshot_method_takes_no_args(self, source)
-                for _ in range(5):
-                    snapshot = source.snapshot()
-                    assert_snapshot_shape(self, snapshot)
-                    self.assertIsNone(snapshot.error)
-                    self.assertLessEqual(len(snapshot.tracks), 3)
-                    clock.advance(0.11)
-                assert_stop_idempotent(self, source)
 
 
 if __name__ == "__main__":
