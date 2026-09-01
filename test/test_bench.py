@@ -45,12 +45,13 @@ class FakeSerial:
 
 class BenchTests(unittest.TestCase):
     def test_ndjson_mode_prints_parsed_frames_with_fake_serial(self):
-        fake = FakeSerial([frame(slot(-30, 1000, -4, 99))])
+        data = frame(slot(-30, 1000, -4, 99))
+        fake = FakeSerial([b"junk" + data[:11], data[11:]])
         stdout = io.StringIO()
         stderr = io.StringIO()
 
         code = bench.main(
-            ["--port", "fake", "--ndjson", "--count", "1"],
+            ["--port", "fake", "--ndjson", "--count", "2"],
             serial_factory=lambda **kwargs: fake,
             stdout=stdout,
             stderr=stderr,
@@ -90,6 +91,9 @@ class BenchTests(unittest.TestCase):
 
         self.assertEqual(code, 1)
         self.assertIn("no serial", stderr.getvalue())
+
+    def test_module_exports_only_cli_entrypoint(self):
+        self.assertEqual(bench.__all__, ["main"])
 
 
 if __name__ == "__main__":

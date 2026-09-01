@@ -1,7 +1,8 @@
 import math
 import unittest
 
-from ld2450 import FRAME_LENGTH, FrameParser, Target, decode_sign_flag, parse_frame
+import ld2450
+from ld2450 import Target, parse_frame
 
 
 def encode_sign_flag(value):
@@ -43,13 +44,15 @@ class LD2450Tests(unittest.TestCase):
         self.assertLess(targets[0].angle, 0)
 
     def test_sign_flag_encoding_is_not_twos_complement(self):
-        self.assertEqual(decode_sign_flag(0x2C, 0x01), -300)
-        self.assertEqual(decode_sign_flag(0x2C, 0x81), 300)
-        self.assertEqual(parse_frame(frame(slot(-1, 1, -2, 3)))[0].speed, -2)
+        target = parse_frame(frame(slot(-300, 300, -2, 3)))[0]
+
+        self.assertEqual(target.x, -300)
+        self.assertEqual(target.y, 300)
+        self.assertEqual(target.speed, -2)
 
     def test_invalid_frame_header_tail_or_length_raises_value_error(self):
         valid = frame(slot(1, 2, 3, 4))
-        self.assertEqual(len(valid), FRAME_LENGTH)
+        self.assertEqual(len(valid), 30)
 
         with self.assertRaises(ValueError):
             parse_frame(b"\x00" + valid[1:])
@@ -58,15 +61,8 @@ class LD2450Tests(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_frame(valid[:-1])
 
-    def test_frame_parser_resyncs_and_handles_split_frames(self):
-        first = frame(slot(10, 20, 30, 40))
-        second = frame(slot(-10, 25, -5, 41))
-        parser = FrameParser()
-
-        self.assertEqual(parser.feed(b"junk" + first[:12]), [])
-        parsed = parser.feed(first[12:] + b"bad" + second)
-
-        self.assertEqual(parsed, [[Target(10, 20, 30, 40)], [Target(-10, 25, -5, 41)]])
+    def test_module_exports_match_contract_surface(self):
+        self.assertEqual(ld2450.__all__, ["Target", "parse_frame"])
 
 
 if __name__ == "__main__":

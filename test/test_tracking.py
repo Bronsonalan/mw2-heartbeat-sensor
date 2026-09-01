@@ -1,6 +1,7 @@
 import unittest
 
 from ld2450 import Target
+import tracking
 from tracking import Orientation, Tracker
 
 
@@ -58,6 +59,9 @@ class TrackingTests(unittest.TestCase):
         self.assertEqual([track.id for track in tracks], [1, 2])
         self.assertLess(tracks[0].x, 100)
         self.assertGreater(tracks[1].x, 400)
+
+    def test_module_exports_match_contract_surface(self):
+        self.assertEqual(tracking.__all__, ["Orientation", "Track", "Tracker"])
 
 
 if __name__ == "__main__":

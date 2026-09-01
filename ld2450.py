@@ -6,12 +6,15 @@ import math
 from typing import NamedTuple
 
 
-HEADER = bytes.fromhex("AA FF 03 00")
-TAIL = bytes.fromhex("55 CC")
-FRAME_LENGTH = 30
-SLOT_COUNT = 3
-SLOT_LENGTH = 8
-PAYLOAD_LENGTH = SLOT_COUNT * SLOT_LENGTH
+__all__ = ["Target", "parse_frame"]
+
+
+_HEADER = bytes.fromhex("AA FF 03 00")
+_TAIL = bytes.fromhex("55 CC")
+_FRAME_LENGTH = 30
+_SLOT_COUNT = 3
+_SLOT_LENGTH = 8
+_PAYLOAD_LENGTH = _SLOT_COUNT * _SLOT_LENGTH
 
 
 class Target(NamedTuple):
@@ -35,7 +38,7 @@ class Target(NamedTuple):
         return self.speed < 0
 
 
-def decode_sign_flag(lo: int, hi: int) -> int:
+def _decode_sign_flag(lo: int, hi: int) -> int:
     """Decode the LD2450 sign-flag integer format."""
 
     if not 0 <= lo <= 0xFF or not 0 <= hi <= 0xFF:
@@ -47,14 +50,14 @@ def decode_sign_flag(lo: int, hi: int) -> int:
 
 
 def _decode_slot(slot: bytes) -> Target | None:
-    if len(slot) != SLOT_LENGTH:
+    if len(slot) != _SLOT_LENGTH:
         raise ValueError("LD2450 target slot must be 8 bytes")
-    if slot == b"\x00" * SLOT_LENGTH:
+    if slot == b"\x00" * _SLOT_LENGTH:
         return None
 
-    x = decode_sign_flag(slot[0], slot[1])
-    y = decode_sign_flag(slot[2], slot[3])
-    speed = decode_sign_flag(slot[4], slot[5])
+    x = _decode_sign_flag(slot[0], slot[1])
+    y = _decode_sign_flag(slot[2], slot[3])
+    speed = _decode_sign_flag(slot[4], slot[5])
     resolution = slot[6] | (slot[7] << 8)
     return Target(x, y, speed, resolution)
 
@@ -66,27 +69,27 @@ def parse_frame(frame: bytes | bytearray | memoryview) -> list[Target]:
     """
 
     data = bytes(frame)
-    if len(data) != FRAME_LENGTH:
-        raise ValueError(f"LD2450 frame must be {FRAME_LENGTH} bytes")
-    if not data.startswith(HEADER):
+    if len(data) != _FRAME_LENGTH:
+        raise ValueError(f"LD2450 frame must be {_FRAME_LENGTH} bytes")
+    if not data.startswith(_HEADER):
         raise ValueError("LD2450 frame header mismatch")
-    if not data.endswith(TAIL):
+    if not data.endswith(_TAIL):
         raise ValueError("LD2450 frame tail mismatch")
 
-    payload = data[len(HEADER) : -len(TAIL)]
-    if len(payload) != PAYLOAD_LENGTH:
+    payload = data[len(_HEADER) : -len(_TAIL)]
+    if len(payload) != _PAYLOAD_LENGTH:
         raise ValueError("LD2450 payload length mismatch")
 
     targets: list[Target] = []
-    for index in range(SLOT_COUNT):
-        start = index * SLOT_LENGTH
-        target = _decode_slot(payload[start : start + SLOT_LENGTH])
+    for index in range(_SLOT_COUNT):
+        start = index * _SLOT_LENGTH
+        target = _decode_slot(payload[start : start + _SLOT_LENGTH])
         if target is not None:
             targets.append(target)
     return targets
 
 
-class FrameParser:
+class _FrameParser:
     """Incrementally extract valid LD2450 frames from arbitrary serial chunks."""
 
     def __init__(self, max_buffer: int = 4096):
@@ -99,21 +102,21 @@ class FrameParser:
         frames: list[list[Target]] = []
 
         while True:
-            header_at = self._buffer.find(HEADER)
+            header_at = self._buffer.find(_HEADER)
             if header_at < 0:
-                keep = max(0, len(HEADER) - 1)
+                keep = max(0, len(_HEADER) - 1)
                 if len(self._buffer) > keep:
                     del self._buffer[:-keep]
                 break
             if header_at:
                 del self._buffer[:header_at]
-            if len(self._buffer) < FRAME_LENGTH:
+            if len(self._buffer) < _FRAME_LENGTH:
                 break
 
-            candidate = bytes(self._buffer[:FRAME_LENGTH])
-            if candidate.endswith(TAIL):
+            candidate = bytes(self._buffer[:_FRAME_LENGTH])
+            if candidate.endswith(_TAIL):
                 frames.append(parse_frame(candidate))
-                del self._buffer[:FRAME_LENGTH]
+                del self._buffer[:_FRAME_LENGTH]
                 continue
 
             # Bad tail after a plausible header: advance one byte and resync.

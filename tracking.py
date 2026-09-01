@@ -10,6 +10,9 @@ from typing import Iterable, NamedTuple
 from ld2450 import Target
 
 
+__all__ = ["Orientation", "Track", "Tracker"]
+
+
 ASSOCIATION_GATE_MM = 600
 POSITION_ALPHA = 0.4
 SPEED_ALPHA = 0.25
@@ -74,7 +77,7 @@ class _TrackState:
         )
 
 
-def apply_orientation(target: Target, orientation: Orientation) -> Target:
+def _apply_orientation(target: Target, orientation: Orientation) -> Target:
     x = target.x
     y = target.y
     if orientation.swap_xy:
@@ -107,7 +110,7 @@ class Tracker:
 
     def update(self, targets: Iterable[Target], now: float | None = None) -> list[Track]:
         now = self.clock() if now is None else now
-        oriented = [apply_orientation(target, self.orientation) for target in targets]
+        oriented = [_apply_orientation(target, self.orientation) for target in targets]
 
         for track in self._tracks:
             track.matched_this_frame = False

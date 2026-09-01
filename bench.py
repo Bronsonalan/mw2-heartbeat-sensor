@@ -7,7 +7,11 @@ import json
 import sys
 from typing import Callable, TextIO
 
-from ld2450 import FrameParser, Target
+from ld2450 import Target
+from ld2450 import _FrameParser
+
+
+__all__ = ["main"]
 
 
 def _target_dict(target: Target) -> dict[str, int]:
@@ -34,7 +38,7 @@ def _open_serial(serial_factory: Callable[..., object], port: str, baud: int, ti
         return serial_factory(port, baud, timeout=timeout)
 
 
-def build_arg_parser() -> argparse.ArgumentParser:
+def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Inspect raw HLK-LD2450 serial data")
     parser.add_argument("--port", default="/dev/serial0")
     parser.add_argument("--baud", type=int, default=256000)
@@ -53,7 +57,7 @@ def main(
     stdout: TextIO | None = None,
     stderr: TextIO | None = None,
 ) -> int:
-    args = build_arg_parser().parse_args(argv)
+    args = _build_arg_parser().parse_args(argv)
     stdout = sys.stdout if stdout is None else stdout
     stderr = sys.stderr if stderr is None else stderr
     if not args.hex and not args.ndjson:
@@ -66,7 +70,7 @@ def main(
         stderr.write(f"bench: {exc}\n")
         return 1
 
-    parser = FrameParser()
+    parser = _FrameParser()
     reads = 0
     frames = 0
     try:

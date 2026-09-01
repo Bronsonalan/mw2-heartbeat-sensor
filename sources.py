@@ -11,8 +11,12 @@ import time
 from dataclasses import dataclass
 from typing import NamedTuple
 
-from ld2450 import FrameParser, Target
+from ld2450 import Target
+from ld2450 import _FrameParser
 from tracking import Orientation, Track, Tracker
+
+
+__all__ = ["RadarSource", "DemoSource", "ReplaySource"]
 
 
 class SourceSnapshot(NamedTuple):
@@ -101,7 +105,7 @@ class RadarSource:
                 continue
 
             backoff = self.RETRY_MIN
-            parser = FrameParser()
+            parser = _FrameParser()
             last_data = time.monotonic()
             self._publish(error=None)
             try:
@@ -210,13 +214,12 @@ class ReplaySource:
         loop: bool = True,
         realtime: bool = True,
         clock=time.monotonic,
-        orientation: Orientation = Orientation(),
     ):
         self.path = path
         self.loop = loop
         self.realtime = realtime
         self.clock = clock
-        self.tracker = Tracker(orientation=orientation)
+        self.tracker = Tracker()
         self._frames_data: list[_ReplayFrame] = []
         self._index = 0
         self._loop_index = 0

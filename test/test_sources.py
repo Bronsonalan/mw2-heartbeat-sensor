@@ -1,9 +1,11 @@
+import inspect
 import json
 import os
 import tempfile
 import unittest
 
-from sources import DemoSource, RadarSource, ReplaySource, SourceSnapshot
+import sources
+from sources import DemoSource, RadarSource, ReplaySource
 
 
 class FakeClock:
@@ -43,7 +45,7 @@ class SourceTests(unittest.TestCase):
         self.source.stop()
         self.source.stop()
 
-        self.assertIsInstance(snapshot, SourceSnapshot)
+        self.assertEqual(snapshot._fields, ("tracks", "error", "frames"))
         self.assertEqual(snapshot.tracks, [])
         self.assertIsNotNone(snapshot.error)
         self.assertEqual(snapshot.frames, 0)
@@ -132,6 +134,12 @@ class SourceTests(unittest.TestCase):
         self.assertEqual(snapshot.tracks, [])
         self.assertIsNotNone(snapshot.error)
         self.assertEqual(snapshot.frames, 0)
+
+    def test_source_exports_and_constructor_signatures_match_contract(self):
+        self.assertEqual(sources.__all__, ["RadarSource", "DemoSource", "ReplaySource"])
+        self.assertEqual(list(inspect.signature(RadarSource).parameters), ["port", "baud", "orientation"])
+        self.assertEqual(list(inspect.signature(DemoSource).parameters), ["scenario", "seed", "clock"])
+        self.assertEqual(list(inspect.signature(ReplaySource).parameters), ["path", "loop", "realtime", "clock"])
 
 
 if __name__ == "__main__":
