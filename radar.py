@@ -43,6 +43,10 @@ PALETTE = {
     "pill_fill": (0x04, 0x14, 0x0C),
     "pill_text": (0xB6, 0xFF, 0xD2),
 }
+BACKGROUND = tuple(
+    int(PALETTE["base"][index] + (PALETTE["wash"][index] - PALETTE["base"][index]) * 0.15)
+    for index in range(3)
+)
 
 
 FONT = {
@@ -202,7 +206,7 @@ class PhosphorRenderer:
         fps_value: float | None = None,
     ) -> Canvas:
         width, height = self.size
-        canvas = Canvas(width, height, PALETTE["base"])
+        canvas = Canvas(width, height, BACKGROUND)
         origin = (width // 2, int(height * 0.90))
         radius = int(height * 0.80)
         radius = max(64, min(radius, height - 16, width // 2 - 12))
@@ -222,10 +226,6 @@ class PhosphorRenderer:
 
     def _draw_face(self, canvas: Canvas, origin: tuple[int, int], radius: int, now: float) -> float:
         ox, oy = origin
-        canvas.fill_rect(0, 0, canvas.width, canvas.height, PALETTE["wash"], 0.15)
-        for r in range(18, radius, 24):
-            canvas.draw_circle(ox, oy, r, PALETTE["wash"], 0.025, fill=True)
-
         for meters in range(1, 7):
             r = int(radius * meters / 6)
             self._draw_arc(canvas, origin, r, -90, 90, PALETTE["grid"], 0.28 if meters < 6 else 0.48, 1)
