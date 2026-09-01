@@ -1,0 +1,154 @@
+{
+  "assets": [
+    {
+      "bytes": 11922,
+      "file": "face.png",
+      "sha256": "60170caabb2558d581cf6721617e2c548ef7991fc2742b4d67f02badf8908d55"
+    },
+    {
+      "bytes": 986,
+      "file": "sweep_00.png",
+      "sha256": "7b262194e3bb81b9ee15571e134768aefff3a15ae3dbfe077c3641eaef929ddd"
+    },
+    {
+      "bytes": 1416,
+      "file": "sweep_01.png",
+      "sha256": "5bd87f65f6a0cb9bad88fa75642abf56d5cc28048e0352e6689e0e70c92bf679"
+    },
+    {
+      "bytes": 1938,
+      "file": "sweep_02.png",
+      "sha256": "e64c554589546452c4d68f4a1928dc69f128275627f8e9a1b6f49f26d960f1cc"
+    },
+    {
+      "bytes": 2789,
+      "file": "sweep_03.png",
+      "sha256": "36863e094d0e0b9183bdf0cc7c5e1818b9a33621ce9ea96c49c84ef70aaa5c86"
+    },
+    {
+      "bytes": 3145,
+      "file": "sweep_04.png",
+      "sha256": "7f1ece48a5425171f75b6a977e15cb5e322aa5748d88e33854cbd2e85464e249"
+    },
+    {
+      "bytes": 3428,
+      "file": "sweep_05.png",
+      "sha256": "fb941feff5060a3d1788e1eedd978b8ecc21101670ddb8fc7a1d41bab8754518"
+    },
+    {
+      "bytes": 4118,
+      "file": "sweep_06.png",
+      "sha256": "ffbf88ccddd980d0baa2815d83e9c664fcf477a77759e825d48328846bb40ebf"
+    },
+    {
+      "bytes": 4555,
+      "file": "sweep_07.png",
+      "sha256": "c0c81fe97565c7d1008f45ce7cbf8f119048923f2011a6da9a17bc54c305d7ed"
+    },
+    {
+      "bytes": 5041,
+      "file": "sweep_08.png",
+      "sha256": "a1421f0eed71787e900cff0784c0007e106a4d38d8eaa8821842c04c53c8de54"
+    },
+    {
+      "bytes": 5672,
+      "file": "sweep_09.png",
+      "sha256": "692b6cae8bc002caf60cbbc6f9a802bb4bcbefe22c9b38dcfaa2e0700db48309"
+    },
+    {
+      "bytes": 6331,
+      "file": "sweep_10.png",
+      "sha256": "25124ba718b983905d19aed372134756739356f5de26f4edb39a5200fd60d313"
+    },
+    {
+      "bytes": 6798,
+      "file": "sweep_11.png",
+      "sha256": "ccd5fbb810c2c1337c1d559e4a8cec93925d7a5604ecd09c62b2a7736dd75529"
+    },
+    {
+      "bytes": 7839,
+      "file": "sweep_12.png",
+      "sha256": "d3a7584e35dd34fe96f65309460fa4fbdf50f51dcdc13dd7a8fdbd488b639188"
+    },
+    {
+      "bytes": 8353,
+      "file": "sweep_13.png",
+      "sha256": "c96ae5832459b149799339f4b8f8a66e5babef4b5af63f05c2842f23bf766f42"
+    },
+    {
+      "bytes": 8644,
+      "file": "sweep_14.png",
+      "sha256": "8af58c3d34c735f1dc2a8a3a493637a0f73776c8b3610ab28c098ca8a407b1ef"
+    },
+    {
+      "bytes": 9096,
+      "file": "sweep_15.png",
+      "sha256": "7d02f1f961b6e9f4ff5cd1eaaf864978dac012454a1894c9770008cff21f8473"
+    },
+    {
+      "bytes": 9603,
+      "file": "sweep_16.png",
+      "sha256": "f7e5f2495b53b8aaf4caf753eee26ce88f12dc514295fbdf9be9ba0c07ee32e3"
+    },
+    {
+      "bytes": 10382,
+      "file": "sweep_17.png",
+      "sha256": "7b756d2e1502be8ed4382ed80eb94228220925bd821d846427708110e2de157c"
+    },
+    {
+      "bytes": 10460,
+      "file": "sweep_18.png",
+      "sha256": "04719086c429f920e42033b0f0ceb95347adfe2fe0c4f0ccb1bb72ad11bf99ef"
+    },
+    {
+      "bytes": 10958,
+      "file": "sweep_19.png",
+      "sha256": "d7d640af937aa15a40293448e7a97a255c3aef99402287e5d58c41503fd519bc"
+    },
+    {
+      "bytes": 11442,
+      "file": "sweep_20.png",
+      "sha256": "46a8c93572f1b95d3d91d261bfded0219c25142f62523e4b4d5b1138721e10a0"
+    },
+    {
+      "bytes": 11978,
+      "file": "sweep_21.png",
+      "sha256": "6894b15441e165131d4b0758735471952c741b1a6ba02e70e271a2497a711654"
+    },
+    {
+      "bytes": 12207,
+      "file": "sweep_22.png",
+      "sha256": "2b1f62209511ea7a5fe055cdf0a5ee7be16dcc3ceb7a140b475faa296f206b4d"
+    },
+    {
+      "bytes": 12489,
+      "file": "sweep_23.png",
+      "sha256": "9b1207776b3434657802d0b59bbde2fe7cdf332b02cd4a4fc4e771bfae4e10fe"
+    },
+    {
+      "bytes": 12569,
+      "file": "sweep_24.png",
+      "sha256": "2f05de8cd894607b1d70448c2895945377e6ccb13536f09359066ced07ba8d84"
+    },
+    {
+      "bytes": 12545,
+      "file": "sweep_25.png",
+      "sha256": "05e268799af206e34808aeeb826969ddf6d09615b367f3bb7f66217997629787"
+    },
+    {
+      "bytes": 972,
+      "file": "sweep_26.png",
+      "sha256": "441da7236f6ffdd8fb4cdfa2d9ce7b8d8df8cf2f7a8e82c530714d92266ce613"
+    }
+  ],
+  "dwell_index": 26,
+  "dwell_seconds": 0.35,
+  "profile": "phosphor",
+  "size": [
+    640,
+    480
+  ],
+  "target_fps": 30,
+  "travel_frames": 26,
+  "travel_seconds": 0.85
+}
