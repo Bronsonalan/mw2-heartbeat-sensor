@@ -1054,9 +1054,9 @@ def run_phosphor(args: argparse.Namespace, source: Any) -> int:
             pygame.init()
             renderer = PygamePhosphorRenderer(pygame, size=args.size, sweep_reveal=args.sweep_reveal, scanlines=args.scanlines)
             if not finite:
-                flags = pygame.FULLSCREEN if args.fullscreen else 0
+                flags = (pygame.FULLSCREEN | pygame.NOFRAME) if args.fullscreen else 0
                 screen = pygame.display.set_mode(args.size, flags)
-                pygame.display.set_caption("MW2 Heartbeat Sensor")
+                pygame.display.set_caption("")
                 clock = pygame.time.Clock()
         except Exception as exc:
             print(f"pygame display unavailable, using headless renderer: {exc}", file=sys.stderr)
